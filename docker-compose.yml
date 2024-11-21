@@ -1,0 +1,37 @@
+version: "3.8"
+
+# https://medium.com/@kinghuang/docker-compose-anchors-aliases-extensions-a1e4105d70bd
+x-container-base: &container-base
+  init: true
+  env_file:
+      - .env
+
+services:
+  WSIbackend:
+    <<: *container-base
+    image: ${WSI_VIEWER_BACKEND_IMAGE}
+    volumes:
+      - ./backend/openslide/app:/app/
+      - ./images:/app/images
+
+  WSI_frontend_builder:
+    <<: *container-base
+    image: ${WSI_VIEWER_FRONTEND_IMAGE}
+    volumes:
+      - ./frontend/wsi-viewer:/frontend/app_to_build
+      - ./nginx/html:/frontend/app/build
+      - ./frontend/frontend_builder/build_webpack.sh:/build_webpack.sh
+    entrypoint: ["sh",  "/build_webpack.sh"]
+    environment:
+      REACT_APP_ENV: "prod"
+      REACT_APP_NGINX_PORT: ${NGINX_PORT}
+
+  nginx:
+    <<: *container-base
+    image: nginx:latest
+    ports:
+      - "${NGINX_PORT}:80"
+    volumes:
+      - ./nginx:/nginx
+      - ./nginx/html:/usr/share/nginx/html/
+    entrypoint: ["sh", "/nginx/entry.sh"]

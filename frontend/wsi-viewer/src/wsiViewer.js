@@ -8,7 +8,7 @@ export default function WSIViewer () {
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
         const file = urlParams.get('file');
-        const tileSourcesUrl = isDevelopment ? `http://localhost:4002/api/dzi/openslide/${file}` : `http://wsibackend/api/dzi/openslide/${file}`
+        const tileSourcesUrl = isDevelopment() ? `http://localhost:4000/api/dzi/${file}` : `http://localhost:${process.env.REACT_APP_NGINX_PORT}/api/dzi/${file}`
         const viewer = OpenSeadragon({
           id: 'openSeaDragon',
           prefixUrl: 'https://cdn.jsdelivr.net/gh/Benomrans/openseadragon-icons@main/images/',

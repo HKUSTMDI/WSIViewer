@@ -33,10 +33,7 @@ def file_md5(fileName):
 def get_metadata(filename, slide_dir, extended):
     # TODO consider restricting filepath
     metadata = {}
-    print(os.getcwd())
-    print(os.path.isfile(os.path.join(os.getcwd(),'images','241183-21.tiff')))
     filepath = os.path.join(slide_dir, filename)
-    print('filepath',filepath)
     if not os.path.isfile(filepath):
         msg = {"error": "No such file"}
         print(msg)

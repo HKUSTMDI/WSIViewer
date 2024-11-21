@@ -1,0 +1,7 @@
+openslide-python
+openslide-bin
+fastapi
+uvicorn
+gunicorn
+pytest
+httpx
