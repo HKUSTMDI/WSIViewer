@@ -16,4 +16,8 @@ docker compose up
 
 Open the webpage in your browser: http://localhost:8082/?file=your_wsi_name.tiff to view the WSI image.
 
+## API
+
+After the Docker container is running, you can view the FastAPI auto-generated documentation at:[http://localhost:8082/api/docs](http://localhost:8082/api/docs)
+
 ## Development

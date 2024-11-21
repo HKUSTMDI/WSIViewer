@@ -16,6 +16,10 @@ docker compose up
 
 在浏览器中打开网页：[http://localhost:8082/?file=your_wsi_name.tiff](http://localhost:8082/?file=your_wsi_name.tiff) 即可看到wsi图片。
 
+## API
+
+docker container运行之后可以在浏览器中打开：:[http://localhost:8082/api/docs](http://localhost:8082/api/docs)查看FASTAPI自动生成的文档。
+
 ## 开发
 
 待完成

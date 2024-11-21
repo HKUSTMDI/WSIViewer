@@ -4,7 +4,7 @@ from use_openslide import use_openslide
 from io import BytesIO
 import os
 
-app = FastAPI(docs_url="/api/docs", redoc_url=None)
+app = FastAPI(docs_url="/api/docs",openapi_url="/api/openapi.json", redoc_url=None)
 
 IMAGE_FILES_DIR = "./images/"
 
