@@ -23,3 +23,7 @@ docker container运行之后可以在浏览器中打开：:[http://localhost:808
 ## 开发
 
 待完成
+
+## 软件许可
+
+本软件采用MIT许可证。详情请查看[LICENSE](./LICENSE.txt)文件。

@@ -21,3 +21,7 @@ Open the webpage in your browser: http://localhost:8082/?file=your_wsi_name.tiff
 After the Docker container is running, you can view the FastAPI auto-generated documentation at:[http://localhost:8082/api/docs](http://localhost:8082/api/docs)
 
 ## Development
+
+## License
+
+WSIViewer is released under the MIT license. For details, see the [LICENSE.txt](./LICENSE.txt) file.
