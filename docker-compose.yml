@@ -13,18 +13,16 @@ services:
     volumes:
       - ./backend/openslide/app:/app/
       - ./images:/app/images
+      - ./annotations:/app/annotations
 
   WSI_frontend_builder:
     <<: *container-base
     image: ${WSI_VIEWER_FRONTEND_IMAGE}
     volumes:
-      - ./frontend/wsi-viewer:/frontend/app_to_build
+      - ./frontend2:/frontend/app_to_build
       - ./nginx/html:/frontend/app/build
-      - ./frontend/frontend_builder/build_webpack.sh:/build_webpack.sh
-    entrypoint: ["sh",  "/build_webpack.sh"]
-    environment:
-      REACT_APP_ENV: "prod"
-      REACT_APP_NGINX_PORT: ${NGINX_PORT}
+      - ./frontend2/build_nextjs.sh:/build_nextjs.sh
+    entrypoint: ["sh", "/build_nextjs.sh"]
 
   nginx:
     <<: *container-base

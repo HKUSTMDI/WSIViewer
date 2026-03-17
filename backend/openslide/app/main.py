@@ -1,132 +1,38 @@
-from fastapi import FastAPI, HTTPException, Response
-from fastapi.responses import StreamingResponse
-from use_openslide import use_openslide
-from io import BytesIO
-import os
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(docs_url="/api/docs",openapi_url="/api/openapi.json", redoc_url=None)
+from core.config import settings
+from core.exceptions import (
+    SlideNotFoundError,
+    SlideOperationError,
+    AnnotationNotFoundError,
+    slide_not_found_handler,
+    slide_operation_error_handler,
+    annotation_not_found_handler,
+)
+from routers import slides, annotations
 
-IMAGE_FILES_DIR = "./images/"
+app = FastAPI(
+    title=settings.app_name,
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json",
+    redoc_url=None,
+)
 
-#健康检查
-@app.get("/api/health")
-async def health_check():
-    """
-    健康检查
-    """
-    return {"status": "healthy!!"}
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-#获取图片区域
-@app.get("/api/region/{filename}/{level}/{x}/{y}/{width}/{height}")
-async def read_slide(
-    filename: str,
-    level: int = 0,
-    x: int = 0,
-    y: int = 0,
-    width: int = 100,
-    height: int = 100,
-):
-    """
-    API 接口，用于读取 OpenSlide 文件中的区域数据。
-    Args:
-        filename (str): 文件名
-        level (int): 图像层级
-        x (int): 区域左上角的 x 坐标
-        y (int): 区域左上角的 y 坐标
-        width (int): 区域宽度
-        height (int): 区域高度
-    Returns:
-        图像数据（PNG 格式）
-    """
-    file_path = os.path.join(IMAGE_FILES_DIR, filename)
-    try:
-        region = use_openslide(
-            slide_path=file_path,
-            operation="read_region",
-            level=level,
-            coords=(x, y),
-            size=(width, height),
-        )
-        # 转换为字节流返回（例如 PNG 格式）
-        output = BytesIO()
-        region.save(output, format="PNG")
-        output.seek(0)
-        return StreamingResponse(output, media_type="image/png")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# Exception handlers
+app.add_exception_handler(SlideNotFoundError, slide_not_found_handler)
+app.add_exception_handler(SlideOperationError, slide_operation_error_handler)
+app.add_exception_handler(AnnotationNotFoundError, annotation_not_found_handler)
 
-# API：获取缩略图
-@app.get("/api/thumbnail/{filename}")
-async def get_thumbnail(filename: str, width: int = 200, height: int = 200):
-    """
-    API 接口，用于获取 OpenSlide 文件的缩略图。"""
-    file_path = os.path.join(IMAGE_FILES_DIR, filename)
-    try:
-        thumbnail = use_openslide(
-            slide_path=file_path,
-            operation="get_thumbnail",
-            size=(width, height),
-        )
-        output = BytesIO()
-        thumbnail.save(output, format="PNG")
-        output.seek(0)
-        return StreamingResponse(output, media_type="image/png")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# API：获取属性信息
-@app.get("/api/properties/{filename}")
-async def get_properties(filename: str):
-    """
-    API 接口，用于获取 OpenSlide 文件的属性信息。
-    """
-    file_path = os.path.join(IMAGE_FILES_DIR, filename)
-    try:
-        properties = use_openslide(
-            slide_path=file_path,
-            operation="properties",
-        )
-        return properties
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-# API: dzi
-@app.get("/api/dzi/{filename}")
-async def dzi(filename: str):
-    """
-    API 接口，用于获取 OpenSlide 文件的 dzi 信息。    
-    """
-    file_path = os.path.join(IMAGE_FILES_DIR, filename)
-    try:
-        dzi = use_openslide(
-            slide_path=file_path,
-            operation="get_dzi_info",
-        )
-        return Response(content=dzi, media_type="text/xml")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/dzi/{filename}/{level}/{pos}")
-async def dzi(filename: str, level: int, pos: str):
-    """
-    API 接口，用于获取 OpenSlide 文件的 dzi 瓦片图。
-    """
-    filename = filename.replace('_files','')
-    file_path = os.path.join(IMAGE_FILES_DIR, filename)
-    x, y = pos.replace('.jpeg','').split('_')
-    x = int(x)
-    y = int(y)
-    pos = (x, y)
-    try:
-        dzi = use_openslide(
-            slide_path=file_path,
-            operation="get_dzi_tile",
-            level=level,
-            coords=pos,
-        )
-        output = BytesIO()
-        dzi.save(output, format="JPEG")
-        output.seek(0)
-        return StreamingResponse(output, media_type="image/JPEG")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# Routers
+app.include_router(slides.router)
+app.include_router(annotations.router)

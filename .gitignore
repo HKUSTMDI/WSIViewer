@@ -166,3 +166,11 @@ cython_debug/
 build.sh
 nginx/html/
 .vscode/
+annotations/
+node_modules/
+frontend2/out/
+frontend2/.next/
+
+# Claude
+.claude/
+CLAUDE.md

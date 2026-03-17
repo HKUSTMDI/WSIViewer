@@ -3,5 +3,6 @@ openslide-bin
 fastapi
 uvicorn
 gunicorn
+pydantic-settings
 pytest
 httpx
