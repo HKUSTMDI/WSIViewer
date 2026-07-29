@@ -1,0 +1,10 @@
+ARG DOCKER_REGISTRY=docker.io
+FROM ${DOCKER_REGISTRY}/library/node:22.13-alpine
+
+ARG NPM_REGISTRY=https://registry.npmjs.org
+
+RUN mkdir -p /frontend/app
+WORKDIR /frontend/app
+
+COPY package.json package-lock.json ./
+RUN npm ci --registry="${NPM_REGISTRY}" --fetch-retries=5 --fetch-timeout=120000

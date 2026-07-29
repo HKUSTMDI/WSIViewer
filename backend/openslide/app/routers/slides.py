@@ -1,8 +1,8 @@
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, Response
 
-from services import slide_service
-from schemas.slides import HealthResponse, MppResponse
+from app.services import slide_service
+from app.schemas.slides import HealthResponse, MppResponse
 
 router = APIRouter(prefix="/api", tags=["slides"])
 

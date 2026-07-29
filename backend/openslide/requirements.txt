@@ -1,8 +1,8 @@
-openslide-python
-openslide-bin
-fastapi
-uvicorn
-gunicorn
-pydantic-settings
-pytest
-httpx
+openslide-python==1.4.3
+openslide-bin==4.0.0.12
+fastapi==0.135.1
+uvicorn==0.41.0
+gunicorn==25.1.0
+pydantic-settings==2.13.1
+pytest==9.0.2
+httpx==0.28.1

@@ -1,0 +1,1 @@
+"""Administrative scripts for WSIViewer."""

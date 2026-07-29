@@ -1,0 +1,1 @@
+"""WSIViewer FastAPI application package."""

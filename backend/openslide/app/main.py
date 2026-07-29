@@ -1,16 +1,18 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from core.config import settings
-from core.exceptions import (
+from app.core.config import settings
+from app.core.exceptions import (
     SlideNotFoundError,
     SlideOperationError,
     AnnotationNotFoundError,
+    AnnotationConflictError,
     slide_not_found_handler,
     slide_operation_error_handler,
     annotation_not_found_handler,
+    annotation_conflict_handler,
 )
-from routers import slides, annotations
+from app.routers import slides, annotations
 
 app = FastAPI(
     title=settings.app_name,
@@ -32,6 +34,7 @@ app.add_middleware(
 app.add_exception_handler(SlideNotFoundError, slide_not_found_handler)
 app.add_exception_handler(SlideOperationError, slide_operation_error_handler)
 app.add_exception_handler(AnnotationNotFoundError, annotation_not_found_handler)
+app.add_exception_handler(AnnotationConflictError, annotation_conflict_handler)
 
 # Routers
 app.include_router(slides.router)

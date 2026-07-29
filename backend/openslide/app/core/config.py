@@ -10,7 +10,9 @@ class Settings(BaseSettings):
     app_name: str = "WSIViewer API"
     image_dir: str = "./images/"
     annotation_dir: str = "./annotations/"
+    annotation_db: str | None = None
     max_workers: int = 10
+    slide_cache_size_per_thread: int = 2
     cors_origins: list[str] = ["*"]
 
 

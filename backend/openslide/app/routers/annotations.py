@@ -1,7 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
-from services import annotation_service
-from schemas.annotations import AnnotationCreate, AnnotationUpdate
+from app.services import annotation_service
+from app.schemas.annotations import (
+    AnnotationBatchRequest,
+    AnnotationBatchResponse,
+    AnnotationCreate,
+    AnnotationUpdate,
+)
 
 router = APIRouter(prefix="/api/annotations", tags=["annotations"])
 
@@ -24,6 +29,12 @@ async def create_annotation(slide_id: str, data: AnnotationCreate):
     return annotation_service.create_annotation(slide_id, data)
 
 
+@router.post("/{slide_id}/batch", response_model=AnnotationBatchResponse)
+async def apply_annotation_batch(slide_id: str, data: AnnotationBatchRequest):
+    """Apply an annotation mutation set atomically."""
+    return annotation_service.apply_batch(slide_id, data)
+
+
 @router.put("/{slide_id}/{annotation_id}")
 async def update_annotation(slide_id: str, annotation_id: str, data: AnnotationUpdate):
     """Update an existing annotation."""
@@ -31,6 +42,10 @@ async def update_annotation(slide_id: str, annotation_id: str, data: AnnotationU
 
 
 @router.delete("/{slide_id}/{annotation_id}", status_code=204)
-async def delete_annotation(slide_id: str, annotation_id: str):
+async def delete_annotation(
+    slide_id: str,
+    annotation_id: str,
+    revision: int | None = Query(default=None, ge=1),
+):
     """Delete an annotation."""
-    annotation_service.delete_annotation(slide_id, annotation_id)
+    annotation_service.delete_annotation(slide_id, annotation_id, revision)

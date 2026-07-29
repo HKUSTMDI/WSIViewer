@@ -168,8 +168,8 @@ nginx/html/
 .vscode/
 annotations/
 node_modules/
-frontend2/out/
-frontend2/.next/
+frontend/wsi-viewer/out/
+frontend/wsi-viewer/.next/
 
 # Claude
 .claude/
