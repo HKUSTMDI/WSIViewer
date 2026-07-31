@@ -7,6 +7,12 @@ const nextConfig: NextConfig = {
     root: process.cwd(),
   },
 
+  // Playwright uses an isolated output directory so its dev server can run
+  // alongside a developer's normal `npm run dev` process.
+  ...(process.env.NEXT_DIST_DIR
+    ? { distDir: process.env.NEXT_DIST_DIR }
+    : {}),
+
   // Static export for production (served by nginx)
   ...(isProd ? { output: "export" } : {}),
 

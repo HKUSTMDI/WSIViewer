@@ -79,6 +79,8 @@ npm run build
 ```
 
 开发服务器将 `/api/*` 代理到 `http://localhost:4000`。生产构建使用 Next.js static export，由 Nginx 提供静态文件。
+Playwright 使用独立的 `.next-playwright` 输出目录，因此可以与正在运行的普通
+开发服务器并行执行，不会争用 Next.js 的构建锁。
 
 ## 测试要求
 

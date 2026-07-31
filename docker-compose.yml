@@ -1,8 +1,6 @@
 # https://medium.com/@kinghuang/docker-compose-anchors-aliases-extensions-a1e4105d70bd
 x-container-base: &container-base
   init: true
-  env_file:
-      - .env
 
 services:
   WSIbackend:
@@ -13,7 +11,7 @@ services:
       args:
         DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.io}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
-    image: ${WSI_VIEWER_BACKEND_IMAGE}
+    image: ${WSI_VIEWER_BACKEND_IMAGE:-hkustmdi/wsi_image_viewer_backend:1.0}
     volumes:
       - ./backend/openslide/app:/app/app
       - ./images:/app/images
@@ -32,7 +30,7 @@ services:
       args:
         DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.io}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
-    image: ${WSI_VIEWER_FRONTEND_IMAGE}
+    image: ${WSI_VIEWER_FRONTEND_IMAGE:-hkustmdi/wsi_image_viewer_frontend:2.0}
     volumes:
       - ./frontend/wsi-viewer:/frontend/app_to_build
       - ./nginx/html:/frontend/app/build
@@ -48,7 +46,9 @@ services:
       WSI_frontend_builder:
         condition: service_completed_successfully
     ports:
-      - "${NGINX_PORT}:80"
+      # The API has no authentication, so keep the stack local unless the
+      # operator explicitly opts into a network-facing bind address.
+      - "${NGINX_BIND_HOST:-127.0.0.1}:${NGINX_PORT:-8082}:80"
     volumes:
       - ./nginx:/nginx
       - ./nginx/html:/usr/share/nginx/html/

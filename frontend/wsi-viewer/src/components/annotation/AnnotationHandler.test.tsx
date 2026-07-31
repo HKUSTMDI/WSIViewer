@@ -4,7 +4,9 @@ import type { Annotation } from "@/types/annotation";
 import { ApiError, api } from "@/lib/api";
 import { useAnnotationStore } from "@/stores/annotationStore";
 import { useViewerStore } from "@/stores/viewerStore";
-import AnnotationHandler from "./AnnotationHandler";
+import AnnotationHandler, {
+  parseApiAnnotationForAnnotorious,
+} from "./AnnotationHandler";
 
 type Listener = (...args: unknown[]) => void;
 
@@ -105,7 +107,353 @@ beforeEach(() => {
   });
 });
 
+describe("parseApiAnnotationForAnnotorious", () => {
+  it("normalizes legacy FragmentSelector rectangles", () => {
+    const parsed = parseApiAnnotationForAnnotorious({
+      ...annotation(1, 0),
+      target: {
+        selector: {
+          type: "FragmentSelector",
+          conformsTo: "http://www.w3.org/TR/media-frags/",
+          value: "xywh=pixel:10,20,30,40",
+        },
+      },
+    });
+
+    expect(parsed).toMatchObject({
+      id: "annotation-1",
+      target: {
+        annotation: "annotation-1",
+        selector: {
+          type: "RECTANGLE",
+          geometry: {
+            x: 10,
+            y: 20,
+            w: 30,
+            h: 40,
+            bounds: { minX: 10, minY: 20, maxX: 40, maxY: 60 },
+          },
+        },
+      },
+    });
+  });
+
+  it("normalizes legacy SVG polygon selectors", () => {
+    const parsed = parseApiAnnotationForAnnotorious({
+      ...annotation(1, 0),
+      target: {
+        selector: {
+          type: "SvgSelector",
+          value: '<svg><polygon points="0,0 12,0 4,9" /></svg>',
+        },
+      },
+    });
+
+    expect(parsed.target).toMatchObject({
+      annotation: "annotation-1",
+      selector: {
+        type: "POLYGON",
+        geometry: {
+          points: [
+            [0, 0],
+            [12, 0],
+            [4, 9],
+          ],
+          bounds: { minX: 0, minY: 0, maxX: 12, maxY: 9 },
+        },
+      },
+    });
+  });
+
+  it("adds hit-test bounds to migrated internal polygons", () => {
+    const parsed = parseApiAnnotationForAnnotorious({
+      ...annotation(1, 0),
+      target: {
+        selector: {
+          type: "POLYGON",
+          geometry: {
+            points: [
+              [2, 4],
+              [10, 3],
+              [6, 11],
+            ],
+          },
+        },
+      },
+    });
+
+    expect(parsed.target).toMatchObject({
+      annotation: "annotation-1",
+      selector: {
+        type: "POLYGON",
+        geometry: {
+          bounds: { minX: 2, minY: 3, maxX: 10, maxY: 11 },
+        },
+      },
+    });
+  });
+});
+
 describe("AnnotationHandler revision synchronization", () => {
+  it("parses every supported legacy selector before the initial visual load", async () => {
+    const loaded: Annotation[] = [
+      {
+        ...annotation(1, 0),
+        id: "fragment",
+        target: {
+          selector: {
+            type: "FragmentSelector",
+            value: "xywh=pixel:1,2,3,4",
+          },
+        },
+      },
+      {
+        ...annotation(1, 0),
+        id: "svg",
+        target: {
+          selector: {
+            type: "SvgSelector",
+            value: '<svg><polygon points="0,0 8,0 0,6" /></svg>',
+          },
+        },
+      },
+      {
+        ...annotation(1, 0),
+        id: "internal-polygon",
+        target: {
+          selector: {
+            type: "POLYGON",
+            geometry: {
+              points: [
+                [3, 4],
+                [9, 4],
+                [4, 12],
+              ],
+            },
+          },
+        },
+      },
+    ];
+    const { annotator } = createAnnotator();
+    annotoriousMock.current = annotator;
+    vi.spyOn(api, "getAnnotations").mockResolvedValue(loaded);
+    vi.spyOn(api, "getMpp").mockResolvedValue({
+      mpp_x: null,
+      mpp_y: null,
+      objective_power: null,
+    });
+
+    render(<AnnotationHandler file="slide.svs" visible />);
+
+    await waitFor(() =>
+      expect(annotator.setAnnotations).toHaveBeenLastCalledWith(
+        [
+          expect.objectContaining({
+            id: "fragment",
+            target: expect.objectContaining({
+              annotation: "fragment",
+              selector: expect.objectContaining({
+                type: "RECTANGLE",
+                geometry: expect.objectContaining({
+                  bounds: { minX: 1, minY: 2, maxX: 4, maxY: 6 },
+                }),
+              }),
+            }),
+          }),
+          expect.objectContaining({
+            id: "svg",
+            target: expect.objectContaining({
+              annotation: "svg",
+              selector: expect.objectContaining({
+                type: "POLYGON",
+                geometry: expect.objectContaining({
+                  bounds: { minX: 0, minY: 0, maxX: 8, maxY: 6 },
+                }),
+              }),
+            }),
+          }),
+          expect.objectContaining({
+            id: "internal-polygon",
+            target: expect.objectContaining({
+              annotation: "internal-polygon",
+              selector: expect.objectContaining({
+                type: "POLYGON",
+                geometry: expect.objectContaining({
+                  bounds: { minX: 3, minY: 4, maxX: 9, maxY: 12 },
+                }),
+              }),
+            }),
+          }),
+        ],
+        true,
+      ),
+    );
+    expect(useAnnotationStore.getState().annotations).toEqual(loaded);
+  });
+
+  it("keeps a newly created annotation when the initial GET resolves late", async () => {
+    const temporary = {
+      ...annotation(0, 0),
+      id: "temporary-annotation",
+    };
+    const saved = annotation(1, 0);
+    const initialLoad = deferred<Annotation[]>();
+    const { annotator, listeners } = createAnnotator();
+    annotoriousMock.current = annotator;
+    vi.spyOn(api, "getAnnotations").mockReturnValue(initialLoad.promise);
+    vi.spyOn(api, "getMpp").mockResolvedValue({
+      mpp_x: null,
+      mpp_y: null,
+      objective_power: null,
+    });
+    vi.spyOn(api, "createAnnotation").mockResolvedValue(saved);
+
+    render(<AnnotationHandler file="slide.svs" visible />);
+    await waitFor(() =>
+      expect(annotator.on).toHaveBeenCalledWith(
+        "createAnnotation",
+        expect.any(Function),
+      ),
+    );
+
+    act(() => {
+      listeners.get("createAnnotation")?.(temporary);
+    });
+    await waitFor(() =>
+      expect(useAnnotationStore.getState().annotations).toEqual([saved]),
+    );
+
+    initialLoad.resolve([]);
+    await act(async () => {
+      await initialLoad.promise;
+      await Promise.resolve();
+    });
+
+    expect(useAnnotationStore.getState().annotations).toEqual([saved]);
+    expect(annotator.setAnnotations).toHaveBeenLastCalledWith(
+      [
+        expect.objectContaining({
+          id: saved.id,
+          target: expect.objectContaining({ annotation: saved.id }),
+        }),
+      ],
+      true,
+    );
+  });
+
+  it("preserves an in-flight temporary shape when the initial GET resolves first", async () => {
+    const temporary = {
+      ...annotation(0, 0),
+      id: "temporary-annotation",
+    };
+    const saved = annotation(1, 0);
+    const initialLoad = deferred<Annotation[]>();
+    const createResponse = deferred<Annotation>();
+    const { annotator, listeners, store } = createAnnotator();
+    annotoriousMock.current = annotator;
+    vi.spyOn(api, "getAnnotations").mockReturnValue(initialLoad.promise);
+    vi.spyOn(api, "getMpp").mockResolvedValue({
+      mpp_x: null,
+      mpp_y: null,
+      objective_power: null,
+    });
+    vi.spyOn(api, "createAnnotation").mockReturnValue(createResponse.promise);
+
+    render(<AnnotationHandler file="slide.svs" visible />);
+    await waitFor(() =>
+      expect(annotator.on).toHaveBeenCalledWith(
+        "createAnnotation",
+        expect.any(Function),
+      ),
+    );
+
+    annotator.addAnnotation(temporary);
+    act(() => {
+      listeners.get("createAnnotation")?.(temporary);
+    });
+    initialLoad.resolve([]);
+    await act(async () => {
+      await initialLoad.promise;
+      await Promise.resolve();
+    });
+
+    expect(annotator.setAnnotations).toHaveBeenLastCalledWith(
+      [expect.objectContaining({ id: temporary.id })],
+      true,
+    );
+    expect(store.getAnnotation(temporary.id)).toBeDefined();
+
+    createResponse.resolve(saved);
+    await waitFor(() =>
+      expect(useAnnotationStore.getState().annotations).toEqual([saved]),
+    );
+    expect(store.getAnnotation(saved.id)).toMatchObject({ id: saved.id });
+    expect(store.getAnnotation(temporary.id)).toBeUndefined();
+  });
+
+  it("deletes a pending create after it receives its backend ID", async () => {
+    const temporary = {
+      ...annotation(0, 0),
+      id: "temporary-annotation",
+    };
+    const saved = annotation(1, 0);
+    const createResponse = deferred<Annotation>();
+    const { annotator, listeners, store } = createAnnotator();
+    annotator.getSelected.mockReturnValue([{ id: temporary.id }]);
+    annotoriousMock.current = annotator;
+    vi.spyOn(api, "getAnnotations").mockResolvedValue([]);
+    vi.spyOn(api, "getMpp").mockResolvedValue({
+      mpp_x: null,
+      mpp_y: null,
+      objective_power: null,
+    });
+    vi.spyOn(api, "createAnnotation").mockReturnValue(createResponse.promise);
+    const deleteAnnotation = vi
+      .spyOn(api, "deleteAnnotation")
+      .mockResolvedValue(undefined);
+
+    render(<AnnotationHandler file="slide.svs" visible />);
+    await waitFor(() =>
+      expect(annotator.on).toHaveBeenCalledWith(
+        "createAnnotation",
+        expect.any(Function),
+      ),
+    );
+    act(() => {
+      listeners.get("createAnnotation")?.(temporary);
+      listeners.get("selectionChanged")?.([temporary]);
+    });
+    await waitFor(() =>
+      expect(api.createAnnotation).toHaveBeenCalledWith(
+        "slide.svs",
+        expect.anything(),
+      ),
+    );
+
+    expect(
+      useViewerStore
+        .getState()
+        .annoActions?.cancelPendingCreate(temporary.id),
+    ).toBe(true);
+    expect(useAnnotationStore.getState().selectedId).toBeNull();
+    expect(store.deleteAnnotation).toHaveBeenCalledWith(
+      temporary.id,
+      "REMOTE",
+    );
+
+    createResponse.resolve(saved);
+    await waitFor(() =>
+      expect(deleteAnnotation).toHaveBeenCalledWith("slide.svs", saved.id, {
+        revision: saved.revision,
+      }),
+    );
+    expect(useAnnotationStore.getState().annotations).toEqual([]);
+    expect(store.addAnnotation).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: saved.id }),
+      "REMOTE",
+    );
+  });
+
   it("persists the latest geometry when edits happen before create resolves", async () => {
     const temporary = {
       ...annotation(0, 0),

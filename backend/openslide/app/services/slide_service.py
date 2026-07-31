@@ -15,8 +15,15 @@ from app.core.exceptions import SlideNotFoundError, SlideOperationError
 
 executor = ThreadPoolExecutor(max_workers=settings.max_workers)
 _thread_cache = threading.local()
-_opened_slides: list[OpenSlide] = []
+_opened_slides: set[OpenSlide] = set()
 _opened_slides_lock = threading.Lock()
+
+MAX_RASTER_DIMENSION = 8192
+MAX_RASTER_PIXELS = 16_777_216
+
+
+class SlideRequestError(ValueError):
+    """Raised when a requested raster cannot be served within safe bounds."""
 
 
 @dataclass
@@ -27,6 +34,8 @@ class _SlideHandle:
 
 
 def _close_slide(slide: OpenSlide) -> None:
+    with _opened_slides_lock:
+        _opened_slides.discard(slide)
     try:
         slide.close()
     except Exception:
@@ -35,7 +44,7 @@ def _close_slide(slide: OpenSlide) -> None:
 
 def _register_slide(slide: OpenSlide) -> None:
     with _opened_slides_lock:
-        _opened_slides.append(slide)
+        _opened_slides.add(slide)
 
 
 def _close_all_slides() -> None:
@@ -103,7 +112,12 @@ def _get_slide_path(filename: str) -> str:
 
 def _read_region(slide_path: str, level: int, coords: tuple, size: tuple) -> Image.Image:
     try:
-        return _get_cached_handle(slide_path).slide.read_region(coords, level, size)
+        slide = _get_cached_handle(slide_path).slide
+        if level < 0 or level >= slide.level_count:
+            raise SlideRequestError(
+                f"level must be between 0 and {slide.level_count - 1}"
+            )
+        return slide.read_region(coords, level, size)
     except (OpenSlideError, OSError) as e:
         raise SlideOperationError(f"OpenSlide error: {str(e)}")
 
@@ -131,7 +145,16 @@ def _get_dzi_info(slide_path: str) -> str:
 
 def _get_dzi_tile(slide_path: str, level: int, coords: tuple) -> Image.Image:
     try:
-        return _get_cached_handle(slide_path).deep_zoom.get_tile(level, coords)
+        deep_zoom = _get_cached_handle(slide_path).deep_zoom
+        if level < 0 or level >= deep_zoom.level_count:
+            raise SlideRequestError(
+                f"Deep Zoom level must be between 0 and {deep_zoom.level_count - 1}"
+            )
+        col, row = coords
+        columns, rows = deep_zoom.level_tiles[level]
+        if col < 0 or col >= columns or row < 0 or row >= rows:
+            raise SlideRequestError("Deep Zoom tile coordinates are out of bounds")
+        return deep_zoom.get_tile(level, coords)
     except (OpenSlideError, OSError) as e:
         raise SlideOperationError(f"OpenSlide error: {str(e)}")
 
@@ -158,6 +181,43 @@ def _image_to_bytes(image: Image.Image, fmt: str = "PNG") -> BytesIO:
     return output
 
 
+def _encode_and_close(image: Image.Image, fmt: str) -> BytesIO:
+    try:
+        return _image_to_bytes(image, fmt)
+    finally:
+        image.close()
+
+
+def _read_region_bytes(
+    slide_path: str,
+    level: int,
+    coords: tuple,
+    size: tuple,
+) -> BytesIO:
+    return _encode_and_close(_read_region(slide_path, level, coords, size), "PNG")
+
+
+def _get_thumbnail_bytes(slide_path: str, size: tuple) -> BytesIO:
+    return _encode_and_close(_get_thumbnail(slide_path, size), "PNG")
+
+
+def _get_dzi_tile_bytes(slide_path: str, level: int, coords: tuple) -> BytesIO:
+    return _encode_and_close(_get_dzi_tile(slide_path, level, coords), "JPEG")
+
+
+def _validate_raster_size(width: int, height: int) -> None:
+    if width <= 0 or height <= 0:
+        raise SlideRequestError("width and height must be positive")
+    if width > MAX_RASTER_DIMENSION or height > MAX_RASTER_DIMENSION:
+        raise SlideRequestError(
+            f"width and height must not exceed {MAX_RASTER_DIMENSION} pixels"
+        )
+    if width * height > MAX_RASTER_PIXELS:
+        raise SlideRequestError(
+            f"requested raster must not exceed {MAX_RASTER_PIXELS} pixels"
+        )
+
+
 def list_slides() -> list[dict]:
     """List all available WSI files."""
     slides = []
@@ -176,18 +236,39 @@ def list_slides() -> list[dict]:
 
 # Async wrappers for all operations
 
-async def read_region(filename: str, level: int, x: int, y: int, width: int, height: int) -> BytesIO:
+async def read_region(
+    filename: str,
+    level: int,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+) -> BytesIO:
+    _validate_raster_size(width, height)
+    if level < 0:
+        raise SlideRequestError("level must be non-negative")
     slide_path = _get_slide_path(filename)
     loop = asyncio.get_running_loop()
-    image = await loop.run_in_executor(executor, _read_region, slide_path, level, (x, y), (width, height))
-    return _image_to_bytes(image, "PNG")
+    return await loop.run_in_executor(
+        executor,
+        _read_region_bytes,
+        slide_path,
+        level,
+        (x, y),
+        (width, height),
+    )
 
 
 async def get_thumbnail(filename: str, width: int = 200, height: int = 200) -> BytesIO:
+    _validate_raster_size(width, height)
     slide_path = _get_slide_path(filename)
     loop = asyncio.get_running_loop()
-    image = await loop.run_in_executor(executor, _get_thumbnail, slide_path, (width, height))
-    return _image_to_bytes(image, "PNG")
+    return await loop.run_in_executor(
+        executor,
+        _get_thumbnail_bytes,
+        slide_path,
+        (width, height),
+    )
 
 
 async def get_properties(filename: str) -> dict:
@@ -203,10 +284,17 @@ async def get_dzi_info(filename: str) -> str:
 
 
 async def get_dzi_tile(filename: str, level: int, col: int, row: int) -> BytesIO:
+    if level < 0 or col < 0 or row < 0:
+        raise SlideRequestError("Deep Zoom level and coordinates must be non-negative")
     slide_path = _get_slide_path(filename)
     loop = asyncio.get_running_loop()
-    image = await loop.run_in_executor(executor, _get_dzi_tile, slide_path, level, (col, row))
-    return _image_to_bytes(image, "JPEG")
+    return await loop.run_in_executor(
+        executor,
+        _get_dzi_tile_bytes,
+        slide_path,
+        level,
+        (col, row),
+    )
 
 
 async def get_mpp(filename: str) -> dict:

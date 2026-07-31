@@ -46,13 +46,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate delivery scripts
+        run: ./scripts/test-delivery.sh
       - run: docker compose config
       - run: docker compose build
       - run: docker compose up -d
       - name: Smoke test full stack
         run: |
           for attempt in {1..30}; do
-            if curl --fail --silent --show-error http://127.0.0.1:8082/api/health; then
+            if curl --fail --silent --show-error \
+                http://127.0.0.1:8082/api/health \
+                --output /tmp/wsi-health.json \
+              && curl --fail --silent --show-error \
+                http://127.0.0.1:8082/ \
+                --output /tmp/wsi-home.html \
+              && grep --quiet 'WSIViewer' /tmp/wsi-home.html; then
+              cat /tmp/wsi-health.json
               exit 0
             fi
             sleep 2

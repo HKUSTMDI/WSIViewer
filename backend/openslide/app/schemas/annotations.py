@@ -2,14 +2,18 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 import uuid
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AnnotationTarget(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     selector: dict[str, Any]
 
 
 class AnnotationBody(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     type: str = "TextualBody"
     value: str = ""
     purpose: str = "commenting"

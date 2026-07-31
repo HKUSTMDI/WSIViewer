@@ -74,6 +74,7 @@ function actions() {
     update: vi.fn(),
     removeVisual: vi.fn(),
     select: vi.fn(),
+    cancelPendingCreate: vi.fn(() => false),
   };
 }
 
@@ -94,6 +95,7 @@ beforeEach(() => {
     selectedId: "annotation-1",
   });
   useViewerStore.setState({
+    file: "slide.svs",
     activeTool: "pan",
     annoActions: actions(),
     error: null,
@@ -249,6 +251,27 @@ describe("ViewerContent annotation metadata actions", () => {
     ).toHaveBeenCalledWith("annotation-1");
   });
 
+  it("cancels a selected annotation whose create request is still pending", async () => {
+    const annoActions = actions();
+    annoActions.cancelPendingCreate.mockReturnValue(true);
+    useAnnotationStore.setState({
+      annotations: [],
+      selectedId: "temporary-annotation",
+    });
+    useViewerStore.setState({ annoActions });
+    const deleteAnnotation = vi.spyOn(api, "deleteAnnotation");
+    render(<ViewerContent file="slide.svs" />);
+
+    fireEvent.keyDown(document.body, { key: "Delete" });
+
+    await waitFor(() =>
+      expect(annoActions.cancelPendingCreate).toHaveBeenCalledWith(
+        "temporary-annotation",
+      ),
+    );
+    expect(deleteAnnotation).not.toHaveBeenCalled();
+  });
+
   it("deduplicates rapid Delete presses while a conflict refresh is pending", async () => {
     const latest = annotation(4, "Latest");
     const refresh = deferred<Annotation>();
@@ -290,5 +313,18 @@ describe("ViewerContent annotation metadata actions", () => {
     await waitFor(() =>
       expect(useViewerStore.getState().error).toBe("Unsupported annotation"),
     );
+  });
+
+  it("clears cross-slide state before exporting a newly selected slide", () => {
+    render(<ViewerContent file="next.svs" />);
+
+    expect(useViewerStore.getState().file).toBe("next.svs");
+    expect(useAnnotationStore.getState()).toMatchObject({
+      annotations: [],
+      selectedId: null,
+    });
+
+    (harness.sidebar as SidebarCallbacks).onExportGeoJson();
+    expect(harness.download).toHaveBeenCalledWith([], "next.svs");
   });
 });

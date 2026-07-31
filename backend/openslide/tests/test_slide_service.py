@@ -1,5 +1,10 @@
+import asyncio
+from io import BytesIO
+import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.services import slide_service
 
@@ -7,6 +12,7 @@ from app.services import slide_service
 def make_slide():
     slide = MagicMock()
     slide.properties = {"openslide.level[0].tile-width": "256"}
+    slide.level_count = 3
     return slide
 
 
@@ -51,6 +57,8 @@ def test_cache_reopens_a_slide_when_the_file_changes():
 
     assert first is not second
     first_slide.close.assert_called_once()
+    assert first_slide not in slide_service._opened_slides
+    assert second_slide in slide_service._opened_slides
 
 
 def test_cache_evicts_the_least_recently_used_slide():
@@ -67,6 +75,91 @@ def test_cache_evicts_the_least_recently_used_slide():
 
     first_slide.close.assert_called_once()
     second_slide.close.assert_not_called()
+    assert first_slide not in slide_service._opened_slides
+    assert second_slide in slide_service._opened_slides
+
+
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [
+        (0, 100),
+        (100, -1),
+        (slide_service.MAX_RASTER_DIMENSION + 1, 1),
+        (4096, 4097),
+    ],
+)
+def test_raster_size_rejects_unsafe_dimensions(width, height):
+    with pytest.raises(slide_service.SlideRequestError):
+        slide_service._validate_raster_size(width, height)
+
+
+def test_read_region_rejects_a_level_outside_the_slide():
+    slide = make_slide()
+    handle = SimpleNamespace(slide=slide)
+
+    with (
+        patch.object(slide_service, "_get_cached_handle", return_value=handle),
+        pytest.raises(slide_service.SlideRequestError),
+    ):
+        slide_service._read_region("slide.svs", 3, (0, 0), (100, 100))
+
+    slide.read_region.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("level", "coords"),
+    [
+        (3, (0, 0)),
+        (1, (2, 0)),
+        (1, (0, 2)),
+    ],
+)
+def test_dzi_tile_rejects_levels_and_coordinates_outside_the_pyramid(
+    level,
+    coords,
+):
+    deep_zoom = MagicMock()
+    deep_zoom.level_count = 3
+    deep_zoom.level_tiles = [(1, 1), (2, 2), (4, 4)]
+    handle = SimpleNamespace(deep_zoom=deep_zoom)
+
+    with (
+        patch.object(slide_service, "_get_cached_handle", return_value=handle),
+        pytest.raises(slide_service.SlideRequestError),
+    ):
+        slide_service._get_dzi_tile("slide.svs", level, coords)
+
+    deep_zoom.get_tile.assert_not_called()
+
+
+def test_async_image_operations_encode_and_close_inside_the_executor():
+    output = BytesIO(b"encoded")
+    image = MagicMock()
+    caller_thread = threading.get_ident()
+    encoder_threads = []
+
+    def encode_in_worker(image_to_encode, fmt):
+        encoder_threads.append(threading.get_ident())
+        assert image_to_encode is image
+        assert fmt == "PNG"
+        return output
+
+    with (
+        patch.object(slide_service, "_get_slide_path", return_value="slide.svs"),
+        patch.object(slide_service, "_read_region", return_value=image),
+        patch.object(
+            slide_service,
+            "_image_to_bytes",
+            side_effect=encode_in_worker,
+        ),
+    ):
+        result = asyncio.run(
+            slide_service.read_region("slide.svs", 0, 0, 0, 100, 100)
+        )
+
+    assert result is output
+    assert encoder_threads and encoder_threads[0] != caller_thread
+    image.close.assert_called_once()
 
 
 def test_list_slides_reads_the_configured_image_directory(tmp_path):

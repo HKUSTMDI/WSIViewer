@@ -14,8 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -122,7 +122,9 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-# .env
+# Docker Compose reads this local override automatically. Keep the runnable
+# public template in .env.example.
+/.env
 .venv
 env/
 venv/
@@ -161,9 +163,19 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 .history/
-*.tiff
 .DS_Store
-build.sh
+
+# Local WSI data can be large or contain sensitive material.
+/images/*
+!/images/.gitkeep
+# Legacy pre-migration location; keep existing local data out of Git.
+/backend/openslide/app/images/*
+
+# Developer-local registry wrappers. The generic build-image.sh scripts are
+# tracked and contain no personal registry defaults.
+/backend/openslide/build.sh
+/frontend/wsi-viewer/build.sh
+
 nginx/html/
 .vscode/
 annotations/

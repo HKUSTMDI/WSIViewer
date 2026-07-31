@@ -38,34 +38,41 @@ export default function AnnotationList({ onDelete }: AnnotationListProps) {
   return (
     <ScrollArea className="h-full">
       <div className="space-y-1 p-2">
-        {annotations.map((ann, index) => (
-          <div
-            key={ann.id}
-            className={`group flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-sm transition-colors hover:bg-accent ${
-              selectedId === ann.id ? "bg-accent" : ""
-            }`}
-            onClick={() => handleSelect(ann.id)}
-          >
-            <div className="flex items-center gap-2 overflow-hidden">
-              <Badge variant="outline" className="shrink-0 text-xs">
-                {index + 1}
-              </Badge>
-              <span className="truncate">{getAnnotationLabel(ann.body)}</span>
-            </div>
-            <Button
-              aria-label={`Delete annotation ${index + 1}`}
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 opacity-0 group-hover:opacity-100"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete?.(ann.id);
-              }}
+        {annotations.map((ann, index) => {
+          const label = getAnnotationLabel(ann.body);
+          const selected = selectedId === ann.id;
+          return (
+            <div
+              key={ann.id}
+              className={`group flex items-center rounded-md text-sm transition-colors hover:bg-accent focus-within:bg-accent ${
+                selected ? "bg-accent" : ""
+              }`}
             >
-              <Trash2 className="h-3 w-3" />
-            </Button>
-          </div>
-        ))}
+              <button
+                type="button"
+                aria-label={`Select annotation ${index + 1}: ${label}`}
+                aria-pressed={selected}
+                className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => handleSelect(ann.id)}
+              >
+                <Badge variant="outline" className="shrink-0 text-xs">
+                  {index + 1}
+                </Badge>
+                <span className="truncate">{label}</span>
+              </button>
+              <Button
+                type="button"
+                aria-label={`Delete annotation ${index + 1}`}
+                variant="ghost"
+                size="icon"
+                className="mr-2 h-6 w-6 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+                onClick={() => onDelete?.(ann.id)}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </div>
+          );
+        })}
       </div>
     </ScrollArea>
   );

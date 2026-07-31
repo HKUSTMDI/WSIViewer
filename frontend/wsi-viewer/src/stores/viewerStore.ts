@@ -10,6 +10,8 @@ interface AnnoActions {
   /** Remove from Annotorious visually without triggering deleteAnnotation event */
   removeVisual: (id: string) => void;
   select: (id: string | null) => void;
+  /** Cancel a native shape whose backend create request is still pending */
+  cancelPendingCreate: (id: string) => boolean;
 }
 
 interface ViewerState {

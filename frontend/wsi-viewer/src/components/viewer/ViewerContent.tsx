@@ -1,6 +1,11 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import {
+  useState,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import type OpenSeadragon from "openseadragon";
 import WSIViewer from "./WSIViewer";
 import ViewerToolbar from "./ViewerToolbar";
@@ -32,12 +37,17 @@ export default function ViewerContent({ file }: ViewerContentProps) {
   const error = useViewerStore((s) => s.error);
   const setError = useViewerStore((s) => s.setError);
   const selectedId = useAnnotationStore((s) => s.selectedId);
+  const setAnnotations = useAnnotationStore((s) => s.setAnnotations);
   const removeAnnotation = useAnnotationStore((s) => s.removeAnnotation);
   const updateAnnotation = useAnnotationStore((s) => s.updateAnnotation);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    setViewer(null);
+    if (useViewerStore.getState().file !== file) {
+      setAnnotations([]);
+    }
     setFile(file);
-  }, [file, setFile]);
+  }, [file, setAnnotations, setFile]);
 
   useViewerNavigationPolicy(viewer, activeTool);
 
@@ -56,7 +66,10 @@ export default function ViewerContent({ file }: ViewerContentProps) {
           const annotation = useAnnotationStore
             .getState()
             .annotations.find((item) => item.id === id);
-          if (!annotation) return;
+          if (!annotation) {
+            annoActions?.cancelPendingCreate(id);
+            return;
+          }
 
           try {
             await api.deleteAnnotation(file, id, {
@@ -242,7 +255,7 @@ export default function ViewerContent({ file }: ViewerContentProps) {
           onViewerReady={handleViewerReady}
         />
         <ScaleBar viewer={viewer} />
-        <MeasureOverlay viewer={viewer} />
+        <MeasureOverlay key={`measure:${file}`} viewer={viewer} />
         <FreehandOverlay viewer={viewer} file={file} />
         <EraserOverlay viewer={viewer} file={file} />
 

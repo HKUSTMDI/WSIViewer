@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import OpenSeadragon from "openseadragon";
 import { useViewerStore } from "@/stores/viewerStore";
 import { angleDeg, pointsToDistance } from "@/lib/measurement";
@@ -213,7 +218,7 @@ export default function MeasureOverlay({ viewer }: MeasureOverlayProps) {
         const points = [...pendingPoints.current];
         let label: string;
         if (activeTool === "measure-angle") {
-          label = `${angleDeg(points[0], points[1], points[2]).toFixed(1)}°`;
+          label = `${angleDeg(points[0], points[1], points[2], mpp).toFixed(1)}°`;
         } else {
           label = pointsToDistance(points[0], points[1], mpp);
         }
@@ -257,6 +262,7 @@ export default function MeasureOverlay({ viewer }: MeasureOverlayProps) {
   return (
     <canvas
       ref={canvasRef}
+      aria-label="Measurement canvas"
       className="absolute inset-0"
       style={{
         zIndex: 30,

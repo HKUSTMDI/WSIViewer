@@ -10,14 +10,18 @@ WSIViewer is a web-based Whole Slide Image (WSI) viewer built with a **Next.js**
 
 ### Full Stack (Docker)
 ```bash
-docker compose up                # Start all services (accessible at http://localhost:8082)
-docker compose up --build        # Rebuild and start
+docker compose up                # Pull published images and start at http://localhost:8082
+docker compose up --build        # Rebuild from the checked-out sources and start
 ```
+
+Compose defaults to the published `hkustmdi` frontend and backend images, so a
+fresh clone does not require `.env`. Copy `.env.example` to the Git-ignored
+`.env` only for local port or image overrides.
 
 ### Frontend (frontend/wsi-viewer/)
 ```bash
 cd frontend/wsi-viewer
-npm install
+npm ci
 npm run dev                      # Dev server on port 3000 (with API proxy to localhost:4000)
 npm run build                    # Production build (static export to out/)
 npm run lint                     # ESLint check
@@ -31,12 +35,25 @@ npm run test:e2e                 # Chromium, Firefox, and WebKit tests
 cd backend/openslide
 source .venv/bin/activate        # Activate venv (create with: python3 -m venv .venv && pip install -r requirements.txt)
 pytest -v                        # Run all tests
-uvicorn app.main:app --reload --host 0.0.0.0 --port 4000  # Dev server
+uvicorn app.main:app --reload --host 127.0.0.1 --port 4000  # Local dev server
 ```
 
-Backend runs via Gunicorn with Uvicorn workers in production: `gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:4000`
+Backend runs via Gunicorn with Uvicorn workers in production: `gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:4000`
 
 **Important:** Always use venv or Docker for Python package installation. Never install globally.
+The API has no authentication. Docker Compose and `dev.sh` bind to `127.0.0.1`
+by default; network exposure must be an explicit, trusted-network decision.
+
+### Container image builds
+```bash
+./backend/openslide/build-image.sh
+./frontend/wsi-viewer/build-image.sh
+./scripts/test-delivery.sh
+```
+
+The tracked `build-image.sh` files have neutral local defaults. Developer-specific
+registry wrappers are named `build.sh` beside them and are intentionally ignored.
+After building custom images, select them through the local `.env`.
 
 ## Architecture
 
@@ -75,9 +92,9 @@ Browser → Nginx (:8082) → /api/*  → FastAPI backend (:4000)
   - `/api/docs` — Swagger UI
 
 ### Docker Services
-- **WSI_frontend_builder:** Node 22 container, runs `next build`, outputs static files to `nginx/html/`
+- **WSI_frontend_builder:** Node 22 container, runs `next build`, then atomically switches `nginx/html/current`
 - **WSIbackend:** Python 3.11 container running FastAPI on port 4000
-- **nginx:** Reverse proxy on port 8082 (configurable via `NGINX_PORT` in `.env`)
+- **nginx:** Reverse proxy on loopback port 8082 (configurable via `NGINX_BIND_HOST` and `NGINX_PORT`)
 
 Directories:
 - `images/` — WSI files (git-ignored), mounted into backend container

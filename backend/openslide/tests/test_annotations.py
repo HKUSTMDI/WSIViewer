@@ -1,12 +1,19 @@
-import pytest
+import inspect
 import json
 import os
+import sqlite3
 import tempfile
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from fastapi.testclient import TestClient
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.main import app
+from app.routers import annotations as annotation_routes
+from app.services import annotation_service
 
 client = TestClient(app)
 
@@ -40,6 +47,69 @@ def test_create_annotation(clean_annotations):
     assert result["body"]["value"] == "Test annotation"
     assert result["target"]["selector"]["value"] == "xywh=pixel:10,20,30,40"
     assert "id" in result
+
+
+def test_w3c_body_and_target_extensions_round_trip(clean_annotations):
+    data = {
+        "body": [
+            {
+                "id": "urn:body:tumor",
+                "type": "TextualBody",
+                "value": "Tumor",
+                "purpose": "tagging",
+                "language": "en",
+                "format": "text/plain",
+                "creator": {"id": "urn:user:pathologist"},
+            }
+        ],
+        "target": {
+            "source": "slide.svs",
+            "scope": "diagnostic",
+            "selector": {
+                "type": "FragmentSelector",
+                "value": "xywh=pixel:10,20,30,40",
+            },
+        },
+    }
+
+    created_response = client.post(
+        f"/api/annotations/{test_slide_id}",
+        json=data,
+    )
+    created = created_response.json()
+
+    assert created_response.status_code == 201
+    assert created["body"] == data["body"]
+    assert created["target"] == data["target"]
+
+    fetched = client.get(
+        f"/api/annotations/{test_slide_id}/{created['id']}"
+    ).json()
+    assert fetched["body"] == data["body"]
+    assert fetched["target"] == data["target"]
+
+    updated_body = [{**data["body"][0], "value": "Updated tumor"}]
+    updated = client.put(
+        f"/api/annotations/{test_slide_id}/{created['id']}",
+        json={"body": updated_body, "revision": created["revision"]},
+    ).json()
+    assert updated["body"] == updated_body
+    assert updated["target"] == data["target"]
+
+
+@pytest.mark.parametrize(
+    "route",
+    [
+        annotation_routes.get_annotations,
+        annotation_routes.get_annotation,
+        annotation_routes.create_annotation,
+        annotation_routes.apply_annotation_batch,
+        annotation_routes.update_annotation,
+        annotation_routes.delete_annotation,
+    ],
+)
+def test_annotation_routes_run_sync_storage_in_fastapi_threadpool(route):
+    assert not inspect.iscoroutinefunction(route)
 
 
 def test_create_and_get_annotation(clean_annotations):
@@ -260,3 +330,86 @@ def test_legacy_json_is_migrated_only_once(clean_annotations):
 
     assert client.delete(f"/api/annotations/{test_slide_id}/legacy-id").status_code == 204
     assert client.get(f"/api/annotations/{test_slide_id}").json() == []
+
+
+def test_concurrent_first_reads_migrate_legacy_json_once(
+    clean_annotations,
+    monkeypatch,
+):
+    slide_id = "migration-race"
+    records = [
+        {
+            "id": f"legacy-{index}",
+            "type": "Annotation",
+            "body": {"value": f"Legacy {index}"},
+            "target": {
+                "selector": {
+                    "type": "POLYGON",
+                    "geometry": {
+                        "points": [[0, 0], [10, 0], [0, 10]],
+                    },
+                }
+            },
+            "created": "2026-01-01T00:00:00Z",
+            "modified": "2026-01-01T00:00:00Z",
+        }
+        for index in range(20)
+    ]
+    with open(
+        os.path.join(clean_annotations, f"{slide_id}.json"),
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(records, file)
+
+    # Initialize the database before the race so this test isolates lazy
+    # migration rather than SQLite's one-time schema setup.
+    connection = annotation_service._connect()
+    connection.close()
+
+    original_save_row = annotation_service._save_row
+
+    def slow_save_row(*args):
+        time.sleep(0.002)
+        return original_save_row(*args)
+
+    monkeypatch.setattr(annotation_service, "_save_row", slow_save_row)
+    start = threading.Barrier(2)
+
+    def load_annotations(_):
+        start.wait()
+        return annotation_service.get_annotations(slide_id)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(load_annotations, range(2)))
+
+    assert all(len(result) == len(records) for result in results)
+
+
+def test_completed_migration_keeps_subsequent_reads_on_the_read_only_fast_path(
+    clean_annotations,
+):
+    assert annotation_service.get_annotations("already-migrated") == []
+
+    with patch.object(
+        annotation_service,
+        "_transaction",
+        side_effect=AssertionError("read unexpectedly acquired a write lock"),
+    ):
+        assert annotation_service.get_annotations("already-migrated") == []
+
+
+def test_wal_initialization_retries_a_transient_cross_process_lock(monkeypatch):
+    connection = MagicMock()
+    locked = sqlite3.OperationalError("database is locked")
+    locked.sqlite_errorcode = sqlite3.SQLITE_BUSY
+    connection.execute.side_effect = [locked, MagicMock()]
+    sleep = MagicMock()
+    monkeypatch.setattr(annotation_service.time, "sleep", sleep)
+
+    annotation_service._enable_wal_mode(connection)
+
+    assert connection.execute.call_count == 2
+    sleep.assert_called_once_with(
+        annotation_service._SCHEMA_RETRY_INTERVAL_SECONDS
+    )

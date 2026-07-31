@@ -10,6 +10,8 @@ import {
 import { mountPlugin as mountToolsPlugin } from "@annotorious/plugin-tools";
 import "@annotorious/plugin-tools/annotorious-plugin-tools.css";
 import { ApiError, api, isAbortError } from "@/lib/api";
+import { boundsFromCoordinates } from "@/features/annotation/geometry/polygon";
+import type { Coordinate } from "@/features/annotation/geometry/types";
 import { enqueueAnnotationMutation } from "@/features/annotation/mutationQueue";
 import { useAnnotationStore } from "@/stores/annotationStore";
 import { useViewerStore } from "@/stores/viewerStore";
@@ -23,7 +25,75 @@ interface AnnotationHandlerProps {
 interface PendingCreate {
   latestTarget: ApiAnnotation["target"];
   hasGeometryUpdate: boolean;
+  cancelled: boolean;
   savedId?: string;
+}
+
+function withLegacyPolygonBounds(annotation: ApiAnnotation): ApiAnnotation {
+  const selector = annotation.target?.selector;
+  const geometry =
+    selector?.type === "POLYGON" &&
+    selector.geometry &&
+    typeof selector.geometry === "object"
+      ? (selector.geometry as Record<string, unknown>)
+      : null;
+  if (!geometry || geometry.bounds || !Array.isArray(geometry.points)) {
+    return annotation;
+  }
+
+  const points: Coordinate[] = [];
+  for (const point of geometry.points) {
+    if (
+      !Array.isArray(point) ||
+      point.length < 2 ||
+      typeof point[0] !== "number" ||
+      typeof point[1] !== "number" ||
+      !Number.isFinite(point[0]) ||
+      !Number.isFinite(point[1])
+    ) {
+      return annotation;
+    }
+    points.push([point[0], point[1]]);
+  }
+
+  const bounds = boundsFromCoordinates(points);
+  if (!bounds) return annotation;
+  return {
+    ...annotation,
+    target: {
+      ...annotation.target,
+      selector: {
+        ...selector,
+        geometry: { ...geometry, bounds },
+      },
+    },
+  };
+}
+
+export function parseApiAnnotationForAnnotorious(annotation: ApiAnnotation) {
+  const normalized = withLegacyPolygonBounds(annotation);
+  const result = parseW3CImageAnnotation(
+    normalized as unknown as Parameters<typeof parseW3CImageAnnotation>[0],
+    { strict: false, invertY: false },
+  );
+  if (!result.parsed) {
+    throw result.error ?? new Error("Failed to parse annotation");
+  }
+  return result.parsed;
+}
+
+function mergeLoadedAnnotations(
+  loaded: ApiAnnotation[],
+  current: ApiAnnotation[],
+): ApiAnnotation[] {
+  const merged = new Map(loaded.map((annotation) => [annotation.id, annotation]));
+  for (const annotation of current) {
+    const serverVersion = merged.get(annotation.id);
+    if (!serverVersion || annotation.revision >= serverVersion.revision) {
+      merged.set(annotation.id, annotation);
+    }
+  }
+  return [...merged.values()];
 }
 
 /**
@@ -49,6 +119,7 @@ export default function AnnotationHandler({
 
   // Track which annotation IDs are already in Annotorious to avoid double-adds
   const annoIdsRef = useRef<Set<string>>(new Set());
+  const pendingCreatesRef = useRef(new Map<string, PendingCreate>());
 
   const removeVisualAnnotation = useCallback(
     (id: string) => {
@@ -64,20 +135,12 @@ export default function AnnotationHandler({
   const replaceVisualAnnotation = useCallback(
     (annotation: ApiAnnotation) => {
       if (!anno || !annotation.id) return;
-      const result = parseW3CImageAnnotation(
-        annotation as unknown as Parameters<
-          typeof parseW3CImageAnnotation
-        >[0],
-        { strict: false, invertY: false },
-      );
-      if (!result.parsed) {
-        throw result.error ?? new Error("Failed to parse annotation");
-      }
+      const parsed = parseApiAnnotationForAnnotorious(annotation);
 
       if (anno.state.store.getAnnotation(annotation.id)) {
-        anno.state.store.updateAnnotation(result.parsed, Origin.REMOTE);
+        anno.state.store.updateAnnotation(parsed, Origin.REMOTE);
       } else {
-        anno.state.store.addAnnotation(result.parsed, Origin.REMOTE);
+        anno.state.store.addAnnotation(parsed, Origin.REMOTE);
       }
       annoIdsRef.current.add(annotation.id);
     },
@@ -101,9 +164,7 @@ export default function AnnotationHandler({
     setAnnoActions({
       add: (ann) => {
         try {
-          anno.addAnnotation(ann as Parameters<typeof anno.addAnnotation>[0]);
-          const a = ann as { id?: string };
-          if (a.id) annoIdsRef.current.add(a.id);
+          replaceVisualAnnotation(ann as ApiAnnotation);
         } catch (e) {
           console.error("Failed to add annotation to Annotorious:", e);
         }
@@ -130,12 +191,21 @@ export default function AnnotationHandler({
           }
         } catch { /* ignore */ }
       },
+      cancelPendingCreate: (id) => {
+        const pending = pendingCreatesRef.current.get(id);
+        if (!pending || pending.savedId) return false;
+        pending.cancelled = true;
+        removeVisualAnnotation(id);
+        setSelected(null);
+        return true;
+      },
     });
     return () => setAnnoActions(null);
   }, [
     anno,
     removeVisualAnnotation,
     replaceVisualAnnotation,
+    setSelected,
     setAnnoActions,
   ]);
 
@@ -161,16 +231,33 @@ export default function AnnotationHandler({
       .getAnnotations(file, { signal: controller.signal })
       .then((anns: ApiAnnotation[]) => {
         if (controller.signal.aborted) return;
-        setAnnotations(anns);
+        const merged = mergeLoadedAnnotations(
+          anns,
+          useAnnotationStore.getState().annotations,
+        );
+        const parsed = merged.map(parseApiAnnotationForAnnotorious);
+        const pendingIds = new Set(
+          [...pendingCreatesRef.current]
+            .filter(([, pending]) => !pending.cancelled && !pending.savedId)
+            .map(([id]) => id),
+        );
+        const pendingVisuals = (
+          anno.getAnnotations() as Array<{ id?: string }>
+        ).filter(
+          (annotation): annotation is { id: string } =>
+            Boolean(annotation.id && pendingIds.has(annotation.id)),
+        );
+        setAnnotations(merged);
         anno.setAnnotations(
-          anns as unknown as Parameters<typeof anno.setAnnotations>[0],
+          [...parsed, ...pendingVisuals] as Parameters<
+            typeof anno.setAnnotations
+          >[0],
           true,
         );
-        annoIdsRef.current = new Set(
-          (anno.getAnnotations() as Array<{ id?: string }>)
-            .map((annotation) => annotation.id)
-            .filter((id): id is string => Boolean(id)),
-        );
+        annoIdsRef.current = new Set([
+          ...merged.map((annotation) => annotation.id),
+          ...pendingVisuals.map((annotation) => annotation.id),
+        ]);
       })
       .catch((error: unknown) => {
         if (!isAbortError(error)) {
@@ -199,8 +286,7 @@ export default function AnnotationHandler({
     for (const ann of annotations) {
       if (!annoIdsRef.current.has(ann.id)) {
         try {
-          anno.addAnnotation(ann as unknown as Parameters<typeof anno.addAnnotation>[0]);
-          annoIdsRef.current.add(ann.id);
+          replaceVisualAnnotation(ann);
         } catch (e) {
           console.error("Sync: failed to add annotation to Annotorious:", ann.id, e);
         }
@@ -211,11 +297,19 @@ export default function AnnotationHandler({
     // Apply cleanup as a REMOTE store change so no backend event is emitted.
     const storeIds = new Set(annotations.map((a) => a.id));
     for (const id of annoIdsRef.current) {
-      if (!storeIds.has(id)) {
+      const isPendingCreate =
+        pendingCreatesRef.current.has(id) &&
+        !pendingCreatesRef.current.get(id)?.savedId;
+      if (!storeIds.has(id) && !isPendingCreate) {
         removeVisualAnnotation(id);
       }
     }
-  }, [anno, annotations, removeVisualAnnotation]);
+  }, [
+    anno,
+    annotations,
+    removeVisualAnnotation,
+    replaceVisualAnnotation,
+  ]);
 
   // Wire events
   useEffect(() => {
@@ -224,7 +318,7 @@ export default function AnnotationHandler({
     // Annotorious can emit geometry updates while the create request is still
     // waiting for the backend-assigned ID. Keep a slide-local alias so those
     // edits can be replayed against the saved ID instead of being discarded.
-    const pendingCreates = new Map<string, PendingCreate>();
+    const pendingCreates = pendingCreatesRef.current;
 
     const persistGeometryUpdate = (
       annotationId: string,
@@ -309,6 +403,7 @@ export default function AnnotationHandler({
       const pending: PendingCreate = {
         latestTarget: ann.target,
         hasGeometryUpdate: false,
+        cancelled: false,
       };
       pendingCreates.set(originalId, pending);
       setError(null);
@@ -318,6 +413,44 @@ export default function AnnotationHandler({
           target: ann.target,
         })
         .then((saved) => {
+          if (pending.cancelled) {
+            pending.savedId = saved.id;
+            pendingCreates.delete(originalId);
+            void enqueueAnnotationMutation(file, saved.id, async () => {
+              try {
+                await api.deleteAnnotation(file, saved.id, {
+                  revision: saved.revision,
+                });
+              } catch (error) {
+                if (error instanceof ApiError && error.status === 404) return;
+
+                let restored = saved;
+                if (error instanceof ApiError && error.status === 409) {
+                  try {
+                    restored = await api.getAnnotation(file, saved.id);
+                  } catch (refreshError) {
+                    if (
+                      refreshError instanceof ApiError &&
+                      refreshError.status === 404
+                    ) {
+                      return;
+                    }
+                  }
+                }
+
+                if (active) {
+                  addAnnotation(restored);
+                  replaceVisualAnnotation(restored);
+                  setError(
+                    error instanceof Error
+                      ? `The cancelled annotation was created, but could not be deleted: ${error.message}`
+                      : "The cancelled annotation was created, but could not be deleted",
+                  );
+                }
+              }
+            });
+            return;
+          }
           if (!active) return;
           // Ignore a superseded create event that happened to reuse a temp ID.
           if (pendingCreates.get(originalId) !== pending) return;
@@ -386,6 +519,13 @@ export default function AnnotationHandler({
       if (!ann.id) return;
       const annotationId = ann.id;
       setError(null);
+
+      const pending = pendingCreates.get(annotationId);
+      if (pending && !pending.savedId) {
+        pending.cancelled = true;
+        setSelected(null);
+        return;
+      }
 
       void enqueueAnnotationMutation(file, annotationId, async () => {
         if (!active) return;

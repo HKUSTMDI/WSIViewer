@@ -23,10 +23,13 @@ cd backend/openslide
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 4000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 4000
 ```
 
 API 文档位于 `http://localhost:4000/api/docs`。
+
+后端 API 当前没有身份认证。只有在可信网络中需要其他机器访问时，才应显式监听
+`0.0.0.0`；Docker Compose 和根目录 `dev.sh` 默认都只监听本机回环地址。
 
 ## 主要 API
 
@@ -69,6 +72,10 @@ WSI_MAX_WORKERS
 WSI_SLIDE_CACHE_SIZE_PER_THREAD
 WSI_CORS_ORIGINS
 ```
+
+`WSI_CORS_ORIGINS` 使用 JSON 数组格式，例如
+`["https://viewer.example.com"]`。默认仅允许本机 Next.js 开发源；生产浏览器经
+Nginx 同源访问 API，不需要放宽 CORS。
 
 ## OpenSlide 并发模型
 

@@ -44,6 +44,7 @@ function createAnnoActions() {
     update: vi.fn(),
     removeVisual: vi.fn(),
     select: vi.fn(),
+    cancelPendingCreate: vi.fn(),
   };
 }
 

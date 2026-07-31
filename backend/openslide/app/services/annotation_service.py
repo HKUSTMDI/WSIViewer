@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,8 @@ from app.schemas.annotations import (
 
 _SCHEMA_LOCK = threading.Lock()
 _INITIALIZED_DATABASES: set[str] = set()
+_SCHEMA_INITIALIZATION_TIMEOUT_SECONDS = 30
+_SCHEMA_RETRY_INTERVAL_SECONDS = 0.01
 
 
 def _database_path() -> Path:
@@ -33,6 +36,27 @@ def _legacy_annotation_file(slide_id: str) -> Path | None:
     return Path(settings.annotation_dir) / f"{slide_id}.json"
 
 
+def _enable_wal_mode(connection: sqlite3.Connection) -> None:
+    deadline = time.monotonic() + _SCHEMA_INITIALIZATION_TIMEOUT_SECONDS
+    while True:
+        try:
+            connection.execute("PRAGMA journal_mode=WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            error_code = getattr(exc, "sqlite_errorcode", None)
+            primary_code = (
+                error_code & 0xFF
+                if isinstance(error_code, int)
+                else None
+            )
+            if (
+                primary_code not in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+                or time.monotonic() >= deadline
+            ):
+                raise
+            time.sleep(_SCHEMA_RETRY_INTERVAL_SECONDS)
+
+
 def _initialize_schema(connection: sqlite3.Connection, path: Path) -> None:
     key = str(path.resolve())
     if key in _INITIALIZED_DATABASES:
@@ -40,6 +64,7 @@ def _initialize_schema(connection: sqlite3.Connection, path: Path) -> None:
     with _SCHEMA_LOCK:
         if key in _INITIALIZED_DATABASES:
             return
+        _enable_wal_mode(connection)
         connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS annotations (
@@ -71,11 +96,14 @@ def _connect() -> sqlite3.Connection:
         isolation_level=None,
         check_same_thread=False,
     )
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("PRAGMA foreign_keys=ON")
-    connection.execute("PRAGMA busy_timeout=30000")
-    _initialize_schema(connection, path)
+    try:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout=30000")
+        _initialize_schema(connection, path)
+        connection.execute("PRAGMA foreign_keys=ON")
+    except Exception:
+        connection.close()
+        raise
     return connection
 
 
@@ -158,25 +186,10 @@ def _migrate_legacy_slide(connection: sqlite3.Connection, slide_id: str) -> None
     if already_migrated:
         return
 
-    legacy_file = _legacy_annotation_file(slide_id)
     with _transaction(connection):
-        if legacy_file and legacy_file.exists():
-            with legacy_file.open("r", encoding="utf-8") as file:
-                records = json.load(file)
-            if not isinstance(records, list):
-                raise ValueError(f"Legacy annotation file must contain a list: {legacy_file}")
-            for record in records:
-                annotation = Annotation.model_validate({**record, "revision": record.get("revision", 1)})
-                exists = connection.execute(
-                    "SELECT 1 FROM annotations WHERE slide_id = ? AND id = ?",
-                    (slide_id, annotation.id),
-                ).fetchone()
-                if not exists:
-                    _save_row(connection, slide_id, annotation)
-        connection.execute(
-            "INSERT INTO annotation_migrations (slide_id, migrated_at) VALUES (?, ?)",
-            (slide_id, datetime.now(timezone.utc).isoformat()),
-        )
+        # Recheck after acquiring the write lock: another request may have
+        # completed this slide's migration after the optimistic read above.
+        _migrate_legacy_slide_if_needed_in_transaction(connection, slide_id)
 
 
 def get_annotations(slide_id: str) -> list[dict]:

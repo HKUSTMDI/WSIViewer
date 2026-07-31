@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse, Response
 
 from app.services import slide_service
@@ -21,19 +23,48 @@ async def list_slides():
 @router.get("/region/{filename}/{level}/{x}/{y}/{width}/{height}")
 async def read_region(
     filename: str,
-    level: int = 0,
-    x: int = 0,
-    y: int = 0,
-    width: int = 100,
-    height: int = 100,
+    level: Annotated[int, Path(ge=0)],
+    x: int,
+    y: int,
+    width: Annotated[
+        int,
+        Path(gt=0, le=slide_service.MAX_RASTER_DIMENSION),
+    ],
+    height: Annotated[
+        int,
+        Path(gt=0, le=slide_service.MAX_RASTER_DIMENSION),
+    ],
 ):
-    output = await slide_service.read_region(filename, level, x, y, width, height)
+    try:
+        output = await slide_service.read_region(
+            filename,
+            level,
+            x,
+            y,
+            width,
+            height,
+        )
+    except slide_service.SlideRequestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return StreamingResponse(output, media_type="image/png")
 
 
 @router.get("/thumbnail/{filename}")
-async def get_thumbnail(filename: str, width: int = 200, height: int = 200):
-    output = await slide_service.get_thumbnail(filename, width, height)
+async def get_thumbnail(
+    filename: str,
+    width: Annotated[
+        int,
+        Query(gt=0, le=slide_service.MAX_RASTER_DIMENSION),
+    ] = 200,
+    height: Annotated[
+        int,
+        Query(gt=0, le=slide_service.MAX_RASTER_DIMENSION),
+    ] = 200,
+):
+    try:
+        output = await slide_service.get_thumbnail(filename, width, height)
+    except slide_service.SlideRequestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return StreamingResponse(output, media_type="image/png")
 
 
@@ -55,8 +86,18 @@ async def get_dzi_info(filename: str):
 
 
 @router.get("/dzi/{filename}/{level}/{pos}")
-async def get_dzi_tile(filename: str, level: int, pos: str):
-    filename = filename.replace("_files", "")
-    x, y = pos.replace(".jpeg", "").split("_")
-    output = await slide_service.get_dzi_tile(filename, level, int(x), int(y))
+async def get_dzi_tile(
+    filename: str,
+    level: Annotated[int, Path(ge=0)],
+    pos: Annotated[
+        str,
+        Path(pattern=r"^[0-9]+_[0-9]+\.jpeg$", max_length=64),
+    ],
+):
+    filename = filename.removesuffix("_files")
+    x, y = pos.removesuffix(".jpeg").split("_", maxsplit=1)
+    try:
+        output = await slide_service.get_dzi_tile(filename, level, int(x), int(y))
+    except slide_service.SlideRequestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return StreamingResponse(output, media_type="image/JPEG")

@@ -2,6 +2,7 @@ import json
 
 from app.core.config import settings
 from app.scripts.migrate_annotations import migrate
+from app.services import annotation_service
 
 
 def test_json_migration_creates_backup_and_is_idempotent(tmp_path, monkeypatch):
@@ -12,8 +13,14 @@ def test_json_migration_creates_backup_and_is_idempotent(tmp_path, monkeypatch):
     record = {
         "id": "legacy-annotation",
         "type": "Annotation",
-        "body": {"value": "Legacy"},
+        "body": {
+            "id": "urn:body:legacy",
+            "value": "Legacy",
+            "language": "en",
+            "creator": {"id": "urn:user:legacy"},
+        },
         "target": {
+            "source": "slide.svs",
             "selector": {
                 "type": "POLYGON",
                 "geometry": {"points": [[0, 0], [10, 0], [0, 10]]},
@@ -30,3 +37,9 @@ def test_json_migration_creates_backup_and_is_idempotent(tmp_path, monkeypatch):
     assert migrate(annotation_dir, database, backup) == (1, 1)
     assert (backup / source.name).exists()
     assert migrate(annotation_dir, database, None) == (1, 1)
+
+    migrated = annotation_service.get_annotations("slide.svs")[0]
+    assert migrated["body"]["id"] == "urn:body:legacy"
+    assert migrated["body"]["language"] == "en"
+    assert migrated["body"]["creator"] == {"id": "urn:user:legacy"}
+    assert migrated["target"]["source"] == "slide.svs"
