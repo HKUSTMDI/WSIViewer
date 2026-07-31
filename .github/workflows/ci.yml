@@ -39,6 +39,19 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:coverage
       - run: npm run build
+      - name: Verify URL-prefix static export
+        env:
+          NEXT_PUBLIC_BASE_PATH: /openmetal-wsiviewer
+        run: |
+          npm run build
+          grep --fixed-strings \
+            'href="/openmetal-wsiviewer/_next/' out/index.html
+          if grep --fixed-strings 'href="/_next/' out/index.html; then
+            echo "root-relative Next.js assets leaked into the prefixed export" >&2
+            exit 1
+          fi
+          grep --fixed-strings \
+            'href="/openmetal-wsiviewer/favicon.ico' out/index.html
       - run: npx playwright install --with-deps
       - run: npm run test:e2e
 

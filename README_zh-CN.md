@@ -44,6 +44,40 @@ Docker Compose 默认只监听 `127.0.0.1`。将 `NGINX_BIND_HOST` 设为
 `0.0.0.0` 会让查看器及其未鉴权 API 可被其他机器访问，因此只应在可信网络中
 明确启用。
 
+### 通过 URL 子路径反向代理
+
+如果公开地址包含路径前缀，需要在前端构建前配置此前缀。例如公开地址为
+`https://example.com/openmetal-wsiviewer/` 时，在 `.env` 中加入：
+
+```dotenv
+WSI_VIEWER_BASE_PATH=/openmetal-wsiviewer
+```
+
+然后重新生成静态前端并创建 Nginx 容器：
+
+```bash
+docker compose up -d --force-recreate WSI_frontend_builder nginx
+```
+
+外层 Nginx 需要在转发前移除路径前缀，`proxy_pass` 末尾的 `/` 不能省略：
+
+```nginx
+location = /openmetal-wsiviewer {
+    return 301 /openmetal-wsiviewer/;
+}
+
+location /openmetal-wsiviewer/ {
+    proxy_pass http://127.0.0.1:8082/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+这样 Next.js 静态资源、页面导航、API 和 DZI 瓦片请求都会保留在同一个公开
+前缀下。如果 API 部署在其他地址，可以单独设置 `WSI_VIEWER_API_BASE`；留空时
+默认为 `<base path>/api`。
+
 ## 本地开发
 
 Python 依赖必须安装在虚拟环境中：

@@ -99,6 +99,8 @@ assert_contains_line \
 assert_contains_line \
   'WSI_VIEWER_BACKEND_IMAGE=hkustmdi/wsi_image_viewer_backend:1.0' \
   "$ROOT_DIR/.env.example"
+assert_contains_line 'WSI_VIEWER_BASE_PATH=' "$ROOT_DIR/.env.example"
+assert_contains_line 'WSI_VIEWER_API_BASE=' "$ROOT_DIR/.env.example"
 if grep -Eq '^[[:space:]]+env_file:' "$ROOT_DIR/docker-compose.yml"; then
   fail "Docker Compose must not require a local .env file"
 fi
@@ -210,10 +212,14 @@ if command -v docker >/dev/null 2>&1 \
   : > "$empty_env"
   compose_defaults="$TMP_DIR/compose-defaults.yml"
   compose_example="$TMP_DIR/compose-example.yml"
+  compose_subpath="$TMP_DIR/compose-subpath.yml"
   docker compose --project-directory "$ROOT_DIR" \
     --env-file "$empty_env" config > "$compose_defaults"
   docker compose --project-directory "$ROOT_DIR" \
     --env-file "$ROOT_DIR/.env.example" config > "$compose_example"
+  WSI_VIEWER_BASE_PATH=/openmetal-wsiviewer \
+    docker compose --project-directory "$ROOT_DIR" \
+      --env-file "$empty_env" config > "$compose_subpath"
   grep -Fq 'host_ip: 127.0.0.1' "$compose_defaults" \
     || fail "Docker Compose must bind nginx to 127.0.0.1 by default"
   grep -Fq 'image: hkustmdi/wsi_image_viewer_frontend:2.0' "$compose_defaults" \
@@ -224,6 +230,10 @@ if command -v docker >/dev/null 2>&1 \
     || fail ".env.example must select the published frontend image"
   grep -Fq 'image: hkustmdi/wsi_image_viewer_backend:1.0' "$compose_example" \
     || fail ".env.example must select the published backend image"
+  grep -Fq 'NEXT_PUBLIC_BASE_PATH: /openmetal-wsiviewer' "$compose_subpath" \
+    || fail "Docker Compose must pass the public base path to the frontend build"
+  grep -Fq 'NEXT_PUBLIC_API_BASE: ""' "$compose_subpath" \
+    || fail "Docker Compose must preserve the default base-path API routing"
 else
   echo "[SKIP] Docker Compose config validation (Docker Compose unavailable)"
 fi

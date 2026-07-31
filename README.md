@@ -44,6 +44,42 @@ Docker Compose binds to `127.0.0.1` by default. Setting
 `NGINX_BIND_HOST=0.0.0.0` makes the viewer—and its unauthenticated API—reachable
 from other machines, so only opt in on a trusted network.
 
+### Reverse proxy under a URL prefix
+
+When the public URL includes a path prefix, set that prefix before the frontend
+builder runs. For example, for
+`https://example.com/openmetal-wsiviewer/`, add this to `.env`:
+
+```dotenv
+WSI_VIEWER_BASE_PATH=/openmetal-wsiviewer
+```
+
+Then rebuild the static export and recreate Nginx:
+
+```bash
+docker compose up -d --force-recreate WSI_frontend_builder nginx
+```
+
+The outer Nginx must strip the prefix before forwarding to WSIViewer. The
+trailing slash on `proxy_pass` is significant:
+
+```nginx
+location = /openmetal-wsiviewer {
+    return 301 /openmetal-wsiviewer/;
+}
+
+location /openmetal-wsiviewer/ {
+    proxy_pass http://127.0.0.1:8082/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+This keeps Next.js assets, page navigation, API calls, and DZI tile requests
+under the same public prefix. `WSI_VIEWER_API_BASE` may be set separately when
+the API is hosted elsewhere; otherwise it defaults to `<base path>/api`.
+
 ## Local development
 
 Create the backend virtual environment without installing Python packages globally:

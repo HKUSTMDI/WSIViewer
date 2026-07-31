@@ -6,8 +6,7 @@ import type {
   AnnotationMutation,
   AnnotationUpdate,
 } from "@/types/annotation";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "/api";
+import { API_BASE } from "./deployment";
 
 export interface RequestOptions {
   signal?: AbortSignal;

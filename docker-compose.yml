@@ -31,6 +31,11 @@ services:
         DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.io}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     image: ${WSI_VIEWER_FRONTEND_IMAGE:-hkustmdi/wsi_image_viewer_frontend:2.0}
+    environment:
+      # Next.js basePath is compiled into the static export by this one-shot
+      # builder. Leave empty for root deployment.
+      NEXT_PUBLIC_BASE_PATH: "${WSI_VIEWER_BASE_PATH:-}"
+      NEXT_PUBLIC_API_BASE: "${WSI_VIEWER_API_BASE:-}"
     volumes:
       - ./frontend/wsi-viewer:/frontend/app_to_build
       - ./nginx/html:/frontend/app/build

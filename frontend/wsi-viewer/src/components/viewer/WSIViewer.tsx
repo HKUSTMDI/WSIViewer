@@ -9,6 +9,7 @@ import {
 } from "@annotorious/react";
 import "@annotorious/react/annotorious-react.css";
 import { api } from "@/lib/api";
+import { appPath } from "@/lib/deployment";
 import { useViewerStore } from "@/stores/viewerStore";
 import AnnotationHandler from "@/components/annotation/AnnotationHandler";
 import type { Color, DrawingStyleExpression } from "@annotorious/react";
@@ -52,7 +53,7 @@ export default function WSIViewer({ file, onViewerReady }: WSIViewerProps) {
   const osdOptions = useMemo(
     () => ({
       tileSources: api.getDziUrl(file),
-      prefixUrl: "/osd-icons/",
+      prefixUrl: appPath("/osd-icons/"),
       showNavigator: true,
       navigatorPosition: "BOTTOM_RIGHT" as const,
       navigatorAutoFade: true,

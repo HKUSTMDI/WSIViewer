@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { APP_BASE_PATH } from "./src/lib/deployment";
 
 const isProd = process.env.NODE_ENV === "production";
 
@@ -15,6 +16,10 @@ const nextConfig: NextConfig = {
 
   // Static export for production (served by nginx)
   ...(isProd ? { output: "export" } : {}),
+
+  // Next.js writes this into links and static asset URLs at build time. Keep
+  // it empty for root deployments or set it to e.g. /openmetal-wsiviewer.
+  ...(APP_BASE_PATH ? { basePath: APP_BASE_PATH } : {}),
 
   // Hide the dev indicator (N badge) in bottom-left corner
   devIndicators: false,
