@@ -2,6 +2,8 @@
 
 WSIViewer is a browser-based Whole Slide Image viewer built with Next.js, OpenSeadragon, Annotorious, FastAPI, OpenSlide, and SQLite.
 
+Live demo: <https://mdi.hkust-gz.edu.cn/openmetal-wsiviewer/>
+
 ## Features
 
 - Deep Zoom Image browsing with pan, zoom, navigator, and physical scale bar.

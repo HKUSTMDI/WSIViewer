@@ -2,6 +2,8 @@
 
 WSIViewer 是基于 Next.js、OpenSeadragon、Annotorious、FastAPI、OpenSlide 和 SQLite 的网页端全切片图像查看器。
 
+在线演示：<https://mdi.hkust-gz.edu.cn/openmetal-wsiviewer/>
+
 ## 功能
 
 - DZI 瓦片浏览、平移、缩放、导航缩略图和真实比例尺。
