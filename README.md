@@ -161,7 +161,9 @@ cd ../..
 ./scripts/test-delivery.sh
 ```
 
-See [the remediation plan](docs/remediation-plan.md) and the development documents in `docs/` for architecture and verification details.
+For architecture, modification guidance, and verification details, see the
+[frontend development guide](docs/frontend-development.md) and
+[backend development guide](docs/backend-development.md).
 
 ## License
 

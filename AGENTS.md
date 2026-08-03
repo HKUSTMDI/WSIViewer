@@ -103,7 +103,6 @@ Directories:
 ### Development Docs
 - `docs/backend-development.md` — Backend architecture, API reference, code style
 - `docs/frontend-development.md` — Frontend architecture, component design, tech stack
-- `docs/upgrade-plan.md` — Upgrade roadmap and task checklist
 
 ## Testing
 

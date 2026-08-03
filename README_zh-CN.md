@@ -155,7 +155,8 @@ cd ../..
 ./scripts/test-delivery.sh
 ```
 
-工程整改和验收要求见 [整改计划](docs/remediation-plan.md)。
+项目架构、修改方式和验证要求见[前端开发文档](docs/frontend-development.md)与
+[后端开发文档](docs/backend-development.md)。
 
 ## 许可证
 
